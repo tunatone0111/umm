@@ -6,7 +6,7 @@ from io import BytesIO
 from argparse import ArgumentParser
 
 from .data import load_data
-from .models.bagel_pipeline import BagelPipeline
+from diffusers import QwenImageEditPlusPipeline
 
 parser = ArgumentParser()
 parser.add_argument("--dsmod", type=int, default=0)
@@ -17,14 +17,15 @@ def run():
     dsmod = args.dsmod
     dname = "datacomp_small"
     ds = load_data(dname)
-    pipe = BagelPipeline.from_pretrained(
-        model_path="data/models/BAGEL-7B-MoT",  # Update this path
-        device="cuda",
-        max_memory_per_gpu="80GiB",
+    pipe = QwenImageEditPlusPipeline.from_pretrained(
+        "Qwen/Qwen-Image-Edit-2509", torch_dtype=torch.bfloat16
     )
+    pipe.to("cuda")
+
+    os.makedirs(f"out/{dname}/qwen", exist_ok=True)
 
     for i, row in enumerate(ds):
-        if os.path.exists(f"out/{dname}/{row['uid']}_origin.png"):
+        if os.path.exists(f"out/{dname}/qwen/{row['uid']}_origin.png"):
             continue
         if i % 4 != dsmod:
             continue
@@ -43,18 +44,21 @@ def run():
 
         with torch.inference_mode():
             result = pipe(
-                images=[original],
+                image=[original],
                 prompt=prompt,
-                num_timesteps=50,
-                cfg_text_scale=4.0,
-                cfg_img_scale=2.0,
+                negative_prompt=" ",
+                num_inference_steps=40,
+                true_cfg_scale=4.0,
+                guidance_scale=1.0,
+                num_images_per_prompt=1,
+                generator=torch.Generator(device="cuda").manual_seed(0),
             )
 
-            output_image = result
-            with open(f"out/{dname}/{row['uid']}_prompt.txt", "w") as f:
-                f.write(prompt)
-            original.save(f"out/{dname}/{row['uid']}_origin.png")
-            output_image.save(f"out/{dname}/{row['uid']}_edited.png")
+        output_image = result.images[0]
+        with open(f"out/{dname}/qwen/{row['uid']}_prompt.txt", "w") as f:
+            f.write(prompt)
+        original.save(f"out/{dname}/qwen/{row['uid']}_origin.png")
+        output_image.save(f"out/{dname}/qwen/{row['uid']}_edited.png")
 
 
 if __name__ == "__main__":
